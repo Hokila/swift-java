@@ -27,8 +27,16 @@ package struct SwiftParsedModuleSymbolTableBuilder {
   /// The build configuration used to resolve #if conditional compilation blocks.
   package let buildConfig: any BuildConfiguration
 
-  /// Extension decls their extended type hasn't been resolved.
-  package var unresolvedExtensions: [ExtensionDeclSyntax]
+  /// An extension decl whose extended type hasn't been resolved yet, paired with
+  /// the path of the source file it was declared in.
+  package struct UnresolvedExtension {
+    package var node: ExtensionDeclSyntax
+    package var sourceFilePath: String
+  }
+
+  /// Extension decls their extended type hasn't been resolved, paired with
+  /// the path of the source file they were declared in.
+  package var unresolvedExtensions: [UnresolvedExtension]
 
   package init(
     moduleName: String,
@@ -213,7 +221,7 @@ extension SwiftParsedModuleSymbolTableBuilder {
     sourceFilePath: String
   ) {
     if !self.tryHandle(extension: node, sourceFilePath: sourceFilePath) {
-      self.unresolvedExtensions.append(node)
+      self.unresolvedExtensions.append(UnresolvedExtension(node: node, sourceFilePath: sourceFilePath))
     }
   }
 
@@ -273,7 +281,7 @@ extension SwiftParsedModuleSymbolTableBuilder {
     while !unresolvedExtensions.isEmpty {
       var extensions = self.unresolvedExtensions
       extensions.removeAll(where: {
-        self.tryHandle(extension: $0, sourceFilePath: "FIXME_MISSING_FILEPATH.swift") // FIXME: missing filepath here in finalize
+        self.tryHandle(extension: $0.node, sourceFilePath: $0.sourceFilePath)
       })
 
       // If we didn't resolve anything, we're done.
