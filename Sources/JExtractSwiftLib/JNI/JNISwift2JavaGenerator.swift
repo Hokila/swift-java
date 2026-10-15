@@ -204,7 +204,8 @@ extension JNISwift2JavaGenerator {
   /// doesn't translate (e.g. referencing `Self`/associated types).
   func supportedProtocolRequirements(of type: ExtractedNominalType) -> [ExtractedFunc] {
     (type.methods + type.variables).filter { requirement in
-      !requirement.isStatic && !requirement.isClass && self.translatedDecl(for: requirement) != nil
+      !requirement.isStatic && !requirement.isClass
+        && (try? self.javaTranslator.translate(requirement)) != nil
     }
   }
 
@@ -218,9 +219,16 @@ extension JNISwift2JavaGenerator {
     var visited: Set<ObjectIdentifier> = []
     var queue: [ExtractedNominalType] = [type]
     var methods: [ExtractedFunc] = []
-    while let current = queue.popLast() {
+    while !queue.isEmpty {
+      let current = queue.removeFirst()
       guard visited.insert(ObjectIdentifier(current)).inserted else { continue }
-      methods.append(contentsOf: self.supportedProtocolRequirements(of: current))
+      for requirement in self.supportedProtocolRequirements(of: current) {
+        if !methods.contains(where: {
+          ExtractedNominalType.satisfiesProtocolRequirement(candidate: requirement, requirement: $0)
+        }) {
+          methods.append(requirement)
+        }
+      }
       queue.append(contentsOf: inheritedProtocols(of: current))
     }
     return methods

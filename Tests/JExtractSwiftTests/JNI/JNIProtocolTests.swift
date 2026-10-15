@@ -82,6 +82,79 @@ struct JNIProtocolTests {
       public func makeChild() -> any ChildProtocol
     """
 
+  let protocolDefaultImplementationSource = """
+      public protocol Test {
+        func action()
+      }
+
+      public extension Test {
+        func action() {}
+      }
+
+      public func makeTest() -> any Test
+    """
+
+  let protocolDefaultImplementationWithDifferentSpellingSource = """
+      public protocol Test {
+        func action(_ value: Int64)
+      }
+
+      public extension Test {
+        func action(_ otherValue: Int64) {}
+      }
+
+      public func makeTest() -> any Test
+    """
+
+  let overloadedProtocolSource = """
+      public protocol Overloaded {
+        func action(a: Int64)
+        func action(b: Int64)
+      }
+
+      public func makeOverloaded() -> any Overloaded
+    """
+
+  let nonthrowingDefaultImplementationSource = """
+      public protocol Test {
+        func work() throws
+      }
+
+      public extension Test {
+        func work() {}
+      }
+
+      public func makeTest() -> any Test
+    """
+
+  let protocolExtensionNonRequirementSource = """
+      public protocol Test {
+        func req()
+      }
+
+      public extension Test {
+        func req() {}
+        func extraHelper() {}
+      }
+
+      public func makeTest() -> any Test
+    """
+
+  let protocolExtensionSetterOnGetOnlyPropertySource = """
+      public protocol Counter {
+        var count: Int64 { get }
+      }
+
+      public extension Counter {
+        var count: Int64 {
+          get { 0 }
+          set {}
+        }
+      }
+
+      public func makeCounter() -> any Counter
+    """
+
   @Test
   func generatesJavaInterface() throws {
     try assertOutput(
@@ -538,6 +611,196 @@ struct JNIProtocolTests {
           return selfPointerExistential$.greeting().getJNILocalRefValue(in: environment)
         }
         """,
+      ]
+    )
+  }
+
+  @Test
+  func existentialBoxDispatchThunkWithDefaultImplementationIsUnique() throws {
+    var config = config
+    config.enableJavaCallbacks = false
+
+    try assertOutput(
+      input: protocolDefaultImplementationSource,
+      config: config,
+      .jni,
+      .swift,
+      detectChunkByInitialLines: 1,
+      expectedChunks: [
+        """
+        @_cdecl("Java_com_example_swift_TestBox__00024action__JJ")
+        public func Java_com_example_swift_TestBox__00024action__JJ(environment: UnsafeMutablePointer<JNIEnv?>!, thisClass: jclass, selfPointer: jlong, selfTypePointer: jlong) {
+          ...
+        }
+        """
+      ],
+      expectedOccurrences: [
+        "@_cdecl(\"Java_com_example_swift_TestBox__00024action__JJ\")": 1,
+        "@_cdecl(\"Java_com_example_swift_TestBox__00024action": 1,
+      ]
+    )
+  }
+
+  @Test
+  func existentialBoxJavaMethodWithDefaultImplementationIsUnique() throws {
+    var config = config
+    config.enableJavaCallbacks = false
+
+    try assertOutput(
+      input: protocolDefaultImplementationSource,
+      config: config,
+      .jni,
+      .java,
+      detectChunkByInitialLines: 1,
+      expectedChunks: [
+        """
+        public void action() {
+          TestBox.$action(this.$memoryAddress(), this.$typeMetadataAddress());
+        }
+        private static native void $action(long selfPointer, long selfTypePointer);
+        """
+      ],
+      notExpectedChunks: ["action_("],
+      expectedOccurrences: [
+        "private static native void $action(long selfPointer, long selfTypePointer);": 1,
+        "public void action();": 1,
+        "public void action() {": 1,
+      ]
+    )
+  }
+
+  @Test
+  func defaultImplementationWithDifferentSpellingIsUnique() throws {
+    var config = config
+    config.enableJavaCallbacks = false
+
+    try assertOutput(
+      input: protocolDefaultImplementationWithDifferentSpellingSource,
+      config: config,
+      .jni,
+      .swift,
+      expectedChunks: [],
+      expectedOccurrences: [
+        "@_cdecl(\"Java_com_example_swift_TestBox__00024action__JJJ\")": 1,
+        "@_cdecl(\"Java_com_example_swift_TestBox__00024action": 1,
+      ]
+    )
+
+    try assertOutput(
+      input: protocolDefaultImplementationWithDifferentSpellingSource,
+      config: config,
+      .jni,
+      .java,
+      expectedChunks: [],
+      notExpectedChunks: ["action_("],
+      expectedOccurrences: [
+        "public void action(long": 2,
+        "private static native void $action(long": 1,
+      ]
+    )
+  }
+
+  @Test
+  func defaultImplementationCallbackWrapperIsUnique() throws {
+    try assertOutput(
+      input: protocolDefaultImplementationSource,
+      config: config,
+      .jni,
+      .swift,
+      expectedChunks: [],
+      expectedOccurrences: [
+        "func action() {": 1
+      ]
+    )
+  }
+
+  @Test
+  func distinctProtocolOverloadsArePreserved() throws {
+    var config = config
+    config.enableJavaCallbacks = false
+
+    try assertOutput(
+      input: overloadedProtocolSource,
+      config: config,
+      .jni,
+      .java,
+      expectedChunks: [],
+      expectedOccurrences: [
+        "public void actionA(long": 2,
+        "public void actionB(long": 2,
+      ]
+    )
+  }
+
+  @Test
+  func nonthrowingDefaultImplementationIsUnique() throws {
+    var config = config
+    config.enableJavaCallbacks = false
+
+    try assertOutput(
+      input: nonthrowingDefaultImplementationSource,
+      config: config,
+      .jni,
+      .swift,
+      expectedChunks: [],
+      expectedOccurrences: [
+        "@_cdecl(\"Java_com_example_swift_TestBox__00024work": 1
+      ]
+    )
+
+    try assertOutput(
+      input: nonthrowingDefaultImplementationSource,
+      config: config,
+      .jni,
+      .java,
+      expectedChunks: [],
+      expectedOccurrences: [
+        "private static native void $work(": 1,
+        "public void work() throws Exception;": 1,
+      ]
+    )
+  }
+
+  @Test
+  func protocolExtensionNonRequirementIsNotTreatedAsRequirement() throws {
+    var config = config
+    config.enableJavaCallbacks = false
+
+    try assertOutput(
+      input: protocolExtensionNonRequirementSource,
+      config: config,
+      .jni,
+      .java,
+      expectedChunks: [
+        "public void req();"
+      ],
+      notExpectedChunks: [
+        "extraHelper"
+      ],
+      expectedOccurrences: [
+        "public void req();": 1
+      ]
+    )
+  }
+
+  @Test
+  func protocolExtensionSetterOnGetOnlyPropertyIsNotTreatedAsRequirement() throws {
+    var config = config
+    config.enableJavaCallbacks = false
+
+    try assertOutput(
+      input: protocolExtensionSetterOnGetOnlyPropertySource,
+      config: config,
+      .jni,
+      .java,
+      expectedChunks: [
+        "public long getCount();"
+      ],
+      notExpectedChunks: [
+        "setCount"
+      ],
+      expectedOccurrences: [
+        "public long getCount();": 1
       ]
     )
   }
